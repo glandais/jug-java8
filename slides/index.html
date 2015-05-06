@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>Java 8 en pratique</title>
+
+		<meta name="description" content="Java 8 en pratique">
+		<meta name="author" content="Gabriel Landais">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/black.css" id="theme">
+		<!--
+		<link rel="stylesheet" href="css/theme/league.css" id="theme">
+		<link rel="stylesheet" href="css/theme/solarized.css" id="theme">
+		-->
+
+		<!-- Code syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<div class="slides">
+				<section id="titre">
+					<h1>Java 8 en pratique</h1>
+					<h3>Quelques exemples</h3>
+					<p>
+						<small>Gabriel Landais</small>
+					</p>
+				</section>
+
+				<section id="intro">
+					<h2>Java 8</h2>
+					<ul>
+						<li>Présentation par José Paumard le 4 décembre 2013</li>
+						<li class="fragment">Disponible depuis le 18 mars 2014</li>
+						<li class="fragment">stream() et λ</li>
+						<li class="fragment">Date / Time <span class="fragment">(Joda-Time)</span></li>
+						<li class="fragment">...</li>
+					</ul>
+
+					<aside class="notes">
+						Notes
+					</aside>
+				</section>
+
+				<section id="objectifs">
+					<h2>Démarche</h2>
+					<ul>
+						<li>Utilisation concrète</li>
+						<li class="fragment">Calcul d'itinéraire TAN (OpenData, graphes)</li>
+						<li class="fragment">Création d'exemples</li>
+						<li class="fragment">Écriture de code Java 5/6/7 <span class="fragment">(sans Guava...)</span></li>
+						<li class="fragment">Réécriture avec Java 8</li>
+					</ul>
+
+					<aside class="notes">
+						Notes
+					</aside>
+				</section>
+
+
+					<section>
+						<p>Exemple 1 : legacy</p>
+						<p>Concaténation de chaines avec un séparateur virgule</p>
+						<pre class="fragment"><code data-trim>
+boolean first = true;
+String resultat = "";
+for (String string : strings) {
+	if (!first) {
+		resultat = resultat + ", ";
+	}
+	resultat = resultat + string;
+	first = false;
+}
+System.out.println(resultat);
+						</code></pre>
+					</section>
+				
+					<section>
+						<p>Exemple 1 : Java 8</p>
+						<pre><code data-trim>
+resultat = strings.stream().collect(Collectors.joining(", "));
+System.out.println(resultat);
+						</code></pre>
+					</section>
+
+
+					<section>
+						<p>Exemple 2 : legacy</p>
+						<p>Lecture et traitement d'un fichier CSV</p>
+						<pre class="fragment"><code data-trim>
+Map&lt;String, String&gt; lignes = new TreeMap&lt;&gt;();
+BufferedReader br = new BufferedReader(new FileReader(csvFile));
+String line;
+boolean first = true;
+while ((line = br.readLine()) != null) {
+	if (!first) {
+		String[] split = line.split(",");
+		lignes.put(split[0], split[2]);
+	}
+	first = false;
+}
+br.close();
+for (Entry&lt;String, String&gt; entry : lignes.entrySet()) {
+	System.out.println(entry.getKey() + " : " + entry.getValue());
+}
+						</code></pre>
+					</section>
+				
+					<section>
+						<p>Exemple 2 : Java 8</p>
+						<pre><code data-trim>
+try (Stream&lt;String&gt; lines = Files.lines(csvFile.toPath())) {
+	Map&lt;String, String&gt; resultat = lines.skip(1)
+			.map(s -> s.split(","))
+			.collect(
+				Collectors.toMap(s -> s[0], s -> s[2])
+			);
+	resultat.forEach((r, n) -> System.out.println(r + " : " + n));
+}
+						</code></pre>
+						<p class="fragment"><code>resultat</code> est une HashMap mais pas une TreeMap...</p>
+					</section>
+
+					<section>
+						<p>Exemple 2 : Java 8</p>
+						<pre><code data-trim>
+try (Stream&lt;String&gt; lines = Files.lines(csvFile.toPath())) {
+	Map&lt;String, String&gt; resultat = lines.skip(1)
+			.map(s -> s.split(","))
+			.collect(
+				Collectors.toMap(s -> s[0], s -> s[2],
+					(a, b) -> a, TreeMap::new)
+			);
+	resultat.forEach((r, n) -> System.out.println(r + " : " + n));
+}
+						</code></pre>
+						<p class="fragment"><code>Collectors.toMap</code> prends soit deux fonctions (mappers clé/valeur), soit quatre...</p>
+					</section>
+
+					<section>
+						<p>Exemple 3 : legacy</p>
+						<p>Parcours récursif d'un dossier</p>
+						<pre class="fragment"><code data-trim>
+File racine = new File(".");
+scan(racine);
+
+private static void scan(File file) {
+	File[] files = file.listFiles();
+	for (File child : files) {
+		if (!child.getName().startsWith(".")) {
+			if (child.isDirectory()) {
+				scan(child);
+			} else if (child.getName().endsWith(".java")) {
+				System.out.println(child.getAbsolutePath());
+			}
+		}
+	}
+}
+						</code></pre>
+					</section>
+				
+					<section>
+						<p>Exemple 3 : Java 8</p>
+						<pre><code data-trim>
+try (Stream&lt;Path&gt; files = Files.walk(racine.toPath())) {
+	files.filter(p -> p.getFileName().toString()
+		.endsWith(".java")).forEach(System.out::println);
+}
+						</code></pre>
+						<p class="fragment">Pourquoi appeler <code>toString()</code> sur le <code>getFileName()</code>?</p>
+					</section>
+
+					<section>
+						<p>Exemple 3 : Java 8</p>
+						<pre><code data-trim>
+try (Stream&lt;Path&gt; files = Files.walk(racine.toPath())) {
+	files.filter(p -> p.getFileName()
+		.endsWith(".java")).forEach(System.out::println);
+}
+						</code></pre>
+						<p class="fragment">N'affiche rien...</p>
+						<p class="fragment">Path.endsWith : Tests if this path ends with a {@code Path}, constructed by converting the given path string</p>
+						<p class="fragment">Le Path.endsWith est équivalent à Path.getFileName.equals...</p>
+					</section>
+
+				<section id="conclusion">
+					<h2>Problématiques</h2>
+					<ul>
+						<li>Javadoc pas toujours clair</li>
+						<li class="fragment">Difficulté de debugger</li>
+					</ul>
+				</section>
+
+				<section id="questions">
+					<h3>Questions?</h3>
+				</section>
+
+			</div>
+
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.js"></script>
+
+		<script>
+
+			// Full list of configuration options available at:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				transition: 'slide', // none/fade/slide/convex/concave/zoom
+
+				// Optional reveal.js plugins
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, condition: function() { return !!document.querySelector( 'pre code' ); }, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true },
+					{ src: 'plugin/notes/notes.js', async: true }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>
