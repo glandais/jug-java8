@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -39,19 +40,18 @@ public class Exemple6 implements Cas, GtfsTan {
 
 	@Override
 	public void execute() {
-		GtfsRelationalDao gtfsDao = getGtfsDao(new File("ARRETS_HORAIRES_CIRCUITS_TAN_GTFS_2015.zip"));
-		List<Stop> allStops = new ArrayList<>(gtfsDao.getAllStops());
-
 		timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM);
 		dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM);
 
-		//		calculerItineraire(gtfsDao, LocalDate.of(2015, 05, 11), LocalTime.of(17, 12), "Polytech'", "Vertou");
-		//		calculerItineraire(gtfsDao, LocalDate.of(2015, 06, 9), LocalTime.of(7, 43), "Californie", "Sautron");
-		calculerItineraire(gtfsDao, LocalDate.of(2015, 06, 27), LocalTime.of(12, 37), "La Plée", "Mairie de Couëron");
+		GtfsRelationalDao gtfsDao = getGtfsDao(new File("ARRETS_HORAIRES_CIRCUITS_TAN_GTFS_2015.zip"));
 
+		calculerItineraire(gtfsDao, LocalDate.of(2015, 05, 11), LocalTime.of(17, 12), "Polytech'", "Vertou");
+		calculerItineraire(gtfsDao, LocalDate.of(2015, 06, 9), LocalTime.of(7, 43), "Californie", "Sautron");
+		calculerItineraire(gtfsDao, LocalDate.of(2015, 06, 27), LocalTime.of(12, 37), "La Plée", "Couëron");
 		calculerItineraire(gtfsDao, LocalDate.of(2015, 3, 2), LocalTime.of(7, 47), "Bio Ouest Laënnec",
 				"Gare de Chantenay");
 
+		//		List<Stop> allStops = new ArrayList<>(gtfsDao.getAllStops());
 		//		Random r = new Random(System.nanoTime());
 		//		IntStream.range(0, 10).forEach(i -> calculerAleatoire(gtfsDao, allStops, r));
 	}
@@ -71,7 +71,104 @@ public class Exemple6 implements Cas, GtfsTan {
 
 	protected void calculerItineraire(GtfsRelationalDao gtfsDao, LocalDate departJour, LocalTime departHeure,
 			String departArret, String arriveeArret) {
+		Comparator<StopTime> stopTimeComparator = (st1, st2) -> Integer.compare(st1.getArrivalTime(),
+				st2.getArrivalTime());
 
+		List<StopTime> stopTimes = calculerArretsPotentiels(gtfsDao, departJour, departHeure, stopTimeComparator);
+
+		// Là on où on est monté dans un trajet
+		Map<String, StopTime> montees = new TreeMap<>();
+		// Liste des arrêts pour arriver à cette station
+		Map<String, List<StopTime[]>> trajetsPourStation = new HashMap<>();
+		// Heure de départ possible de la station
+		Map<String, Integer> departsStation = new TreeMap<>();
+
+		// Tous les arrêts (Stop) correspondant à la station de départ
+		List<Stop> stopsDepart = gtfsDao.getAllStops().parallelStream().filter(s -> s.getName().equals(departArret))
+				.collect(Collectors.toList());
+		stopsDepart.forEach(s -> departsStation.put(getStationId(s), departHeure.toSecondOfDay()));
+		stopsDepart.forEach(s -> trajetsPourStation.put(getStationId(s), Collections.emptyList()));
+
+		for (StopTime arret : stopTimes) {
+			String stationId = getStationId(arret.getStop());
+
+			String trajet = getTripId(arret);
+			if (departsStation.containsKey(stationId) && departsStation.get(stationId) > arret.getDepartureTime()) {
+				// impossible de changer
+			} else if (departsStation.containsKey(stationId)
+					&& departsStation.get(stationId) <= arret.getDepartureTime()) {
+				// on monte dans un trajet si le découvre
+				montees.putIfAbsent(trajet, arret);
+			} else if (montees.containsKey(trajet)) {
+				// arrêt possible car possibilité d'être monté sur ce trajet
+				// auparavant
+
+				// Stockage des changements
+				StopTime derniereMontee = montees.get(trajet);
+				// Précédentes montees
+				List<StopTime[]> trajetsPourCetteStation = new ArrayList<>(
+						trajetsPourStation.get(getStationId(derniereMontee.getStop())));
+
+				trajetsPourCetteStation.add(new StopTime[] { derniereMontee, arret });
+				trajetsPourStation.put(stationId, trajetsPourCetteStation);
+
+				// on ne peut pas partir plus tôt de cet arrêt
+				departsStation.put(stationId, arret.getArrivalTime() + 30);
+				if (arriveeArret.equals(arret.getStop().getName())) {
+
+					//					System.out.println("************");
+					//					montees.forEach((s, st) -> System.out.println(s + " " + st.toString()));
+					//					System.out.println("************");
+					//					departsStation.forEach((s, st) -> System.out.println(s + " " + st.toString()));
+					//					System.out.println("************");
+
+					// tous les arrêts
+					List<StopTime> stops = trajetsPourCetteStation.stream()
+							.flatMap(sts -> stopTimes.stream()
+									.filter(st -> getTripId(st).equals(getTripId(sts[0]))
+											&& sts[0].getStopSequence() <= st.getStopSequence()
+											&& st.getStopSequence() <= sts[1].getStopSequence()))
+							.sorted(stopTimeComparator).collect(Collectors.toList());
+
+					//					afficherResultat(departJour, departHeure, stops, false);
+
+					List<StopTime> newStops = new ArrayList<>(stops);
+
+					// si on passe plusieurs fois au premier arrêt
+					stops.stream().collect(Collectors.groupingBy(st -> getStationId(st.getStop()))).values().stream()
+							.filter(e -> e.size() > 1 && e.contains(stops.get(0)))
+							.map(l -> l.stream().sorted(stopTimeComparator).collect(Collectors.toList()))
+							.flatMapToInt(l -> IntStream.range(stops.indexOf(l.get(0)), stops.indexOf(l.get(1))))
+							.forEach(i -> newStops.remove(stops.get(i)));
+
+					// suppression des arrêts entre les arrêts plus qu'en
+					// doubles
+					stops.stream().collect(Collectors.groupingBy(st -> getStationId(st.getStop()))).values().stream()
+							.filter(e -> e.size() > 2)
+							.map(l -> l.stream().sorted(stopTimeComparator).collect(Collectors.toList()))
+							.flatMapToInt(
+									l -> IntStream.range(stops.indexOf(l.get(1)), stops.indexOf(l.get(l.size() - 1))))
+							.forEach(i -> newStops.remove(stops.get(i)));
+
+					//					afficherResultat(departJour, departHeure, newStops, false);
+
+					// premier et dernier arrêt pour chaque trajet
+					List<StopTime> okStops = newStops.stream().collect(Collectors.groupingBy(st -> getTripId(st)))
+							.values().stream()
+							.map(l -> l.stream().sorted(stopTimeComparator).collect(Collectors.toList()))
+							.flatMap(l -> IntStream.range(0, 2).mapToObj(i -> l.get(i * (l.size() - 1))))
+							.sorted(stopTimeComparator).collect(Collectors.toList());
+
+					// affichage
+					afficherResultat(departJour, departHeure, okStops, true);
+					break;
+				}
+			}
+		}
+	}
+
+	private List<StopTime> calculerArretsPotentiels(GtfsRelationalDao gtfsDao, LocalDate departJour,
+			LocalTime departHeure, Comparator<StopTime> stopTimeComparator) {
 		// 1 - recherche des services (ServiceCalendar) pour le jour du départ
 
 		// 1a - jour de la semaine
@@ -143,101 +240,17 @@ public class Exemple6 implements Cas, GtfsTan {
 		Set<String> tripsJour = gtfsDao.getAllTrips().parallelStream()
 				.filter(t -> serviceIdsForDate.contains(t.getServiceId().getId())).map(t -> t.getId().getId())
 				.collect(Collectors.toSet());
-				// System.out.println("***************");
-				// tripsJour.stream().forEach(t -> System.out.println(t));
+
+		// System.out.println("***************");
+		// tripsJour.stream().forEach(t -> System.out.println(t));
 
 		// Récupère tous les arrêts (StopTime) des trajets de la journée, après
 		// l'heure de départ et trié par ordre chronologique
-		Comparator<StopTime> stopTimeComparator = (st1, st2) -> Integer.compare(st1.getArrivalTime(),
-				st2.getArrivalTime());
 		List<StopTime> stopTimes = gtfsDao.getAllStopTimes().parallelStream()
 				.filter(st -> tripsJour.contains(getTripId(st)))
 				.filter(st -> st.getDepartureTime() >= departHeure.toSecondOfDay()).sorted(stopTimeComparator)
 				.collect(Collectors.toList());
-
-		// Là on où on est monté dans un trajet
-		Map<String, StopTime> montees = new HashMap<>();
-		// Liste des arrêts pour arriver à cette station
-		Map<String, List<StopTime[]>> trajetsPourStation = new HashMap<>();
-		// Heure de départ possible de la station
-		Map<String, Integer> departsStation = new HashMap<>();
-
-		// Tous les arrêts (Stop) correspondant à la station de départ
-		List<Stop> stopsDepart = gtfsDao.getAllStops().parallelStream().filter(s -> s.getName().equals(departArret))
-				.collect(Collectors.toList());
-		stopsDepart.forEach(s -> departsStation.put(getStationId(s), departHeure.toSecondOfDay()));
-		stopsDepart.forEach(s -> trajetsPourStation.put(getStationId(s), Collections.emptyList()));
-
-		for (StopTime arret : stopTimes) {
-			String stationId = getStationId(arret.getStop());
-
-			String trajet = getTripId(arret);
-			if (departsStation.containsKey(stationId) && departsStation.get(stationId) > arret.getDepartureTime()) {
-				// impossible de changer
-			} else if (departsStation.containsKey(stationId)
-					&& departsStation.get(stationId) <= arret.getDepartureTime()) {
-				// on monte dans un trajet si le découvre
-				montees.putIfAbsent(trajet, arret);
-			} else if (montees.containsKey(trajet)) {
-				// arrêt possible car possibilité d'être monté sur ce trajet
-				// auparavant
-
-				// Stockage des changements
-				StopTime derniereMontee = montees.get(trajet);
-				// Précédentes montees
-				List<StopTime[]> trajetsPourCetteStation = new ArrayList<>(
-						trajetsPourStation.get(getStationId(derniereMontee.getStop())));
-
-				trajetsPourCetteStation.add(new StopTime[] { derniereMontee, arret });
-				trajetsPourStation.put(stationId, trajetsPourCetteStation);
-
-				// on ne peut pas partir plus tôt de cet arrêt
-				departsStation.put(stationId, arret.getArrivalTime() + 30);
-				if (arriveeArret.equals(arret.getStop().getName())) {
-
-					// tous les arrêts
-					List<StopTime> stops = trajetsPourCetteStation.stream()
-							.flatMap(sts -> stopTimes.stream()
-									.filter(st -> getTripId(st).equals(getTripId(sts[0]))
-											&& sts[0].getStopSequence() <= st.getStopSequence()
-											&& st.getStopSequence() <= sts[1].getStopSequence()))
-							.sorted(stopTimeComparator).collect(Collectors.toList());
-
-					//					afficherResultat(departJour, departHeure, stops, false);
-
-					List<StopTime> newStops = new ArrayList<>(stops);
-
-					// si on passe plusieurs fois au premier arrêt
-					stops.stream().collect(Collectors.groupingBy(st -> getStationId(st.getStop()))).values().stream()
-							.filter(e -> e.size() > 1 && e.contains(stops.get(0)))
-							.map(l -> l.stream().sorted(stopTimeComparator).collect(Collectors.toList()))
-							.flatMapToInt(l -> IntStream.range(stops.indexOf(l.get(0)), stops.indexOf(l.get(1))))
-							.forEach(i -> newStops.remove(stops.get(i)));
-
-					// suppression des arrêts entre les arrêts plus qu'en
-					// doubles
-					stops.stream().collect(Collectors.groupingBy(st -> getStationId(st.getStop()))).values().stream()
-							.filter(e -> e.size() > 2)
-							.map(l -> l.stream().sorted(stopTimeComparator).collect(Collectors.toList()))
-							.flatMapToInt(
-									l -> IntStream.range(stops.indexOf(l.get(1)), stops.indexOf(l.get(l.size() - 1))))
-							.forEach(i -> newStops.remove(stops.get(i)));
-
-					//					afficherResultat(departJour, departHeure, newStops, false);
-
-					// premier et dernier arrêt pour chaque trajet
-					List<StopTime> okStops = newStops.stream().collect(Collectors.groupingBy(st -> getTripId(st)))
-							.values().stream()
-							.map(l -> l.stream().sorted(stopTimeComparator).collect(Collectors.toList()))
-							.flatMap(l -> IntStream.range(0, 2).mapToObj(i -> l.get(i * (l.size() - 1))))
-							.sorted(stopTimeComparator).collect(Collectors.toList());
-
-					// affichage
-					afficherResultat(departJour, departHeure, okStops, true);
-					break;
-				}
-			}
-		}
+		return stopTimes;
 	}
 
 	private String getTripId(StopTime st) {
@@ -264,8 +277,7 @@ public class Exemple6 implements Cas, GtfsTan {
 		System.out.println("Départ : " + dateFormatter.format(departJour) + " " + timeFormatter.format(departHeure));
 		for (int i = 0; i < stops.size(); i++) {
 			StopTime st = stops.get(i);
-			System.out.println(timeFormatter.format(getDateTime(st)) + " " + st.getStop().getName() + " ("
-					+ getStationId(st.getStop()) + ")");
+			System.out.println(timeFormatter.format(getDateTime(st)) + " " + st.getStop().getName());
 			if (!resultatFinal || (i % 2) == 0) {
 				System.out.println(" | " + st.getTrip().getRoute().getShortName() + " (-> "
 						+ st.getTrip().getTripHeadsign() + ")");
