@@ -59,8 +59,9 @@ public class Exemple4 implements Cas, GtfsTan {
 
 		Comparator<Entry<String, List<Stop>>> comparator1 = (e1,
 				e2) -> -Integer.compare(e1.getValue().size(), e2.getValue().size());
-		Comparator<Entry<String, List<Stop>>> comparator2 = (e1, e2) -> Collator.getInstance().compare(e1.getKey(),
-				e2.getKey());
+		Collator collator = Collator.getInstance();
+		collator.setStrength(Collator.PRIMARY);
+		Comparator<Entry<String, List<Stop>>> comparator2 = (e1, e2) -> collator.compare(e1.getKey(), e2.getKey());
 
 		stops.entrySet().stream().sorted(comparator1.thenComparing(comparator2))
 				.forEach(e -> System.out.println(e.getKey() + " " + e.getValue().size()));

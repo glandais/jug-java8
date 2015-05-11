@@ -24,7 +24,6 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import org.glandais.jug.java8.jts.LengthSubstring;
 import org.glandais.jug.java8.jts.LengthToPoint;
@@ -120,9 +119,9 @@ public class Exemple7 implements Cas, GtfsTan {
 		calculerItineraire(gtfsDao, LocalDate.of(2015, 05, 9), LocalTime.of(21, 37), "Dolto", "Mandel");
 		calculerItineraire(gtfsDao, LocalDate.of(2015, 05, 9), LocalTime.of(21, 37), "Dolto", "Beaulieu");
 
-		List<Stop> allStops = new ArrayList<>(gtfsDao.getAllStops());
-		Random r = new Random(System.nanoTime());
-		IntStream.range(0, 100).forEach(i -> calculerAleatoire(gtfsDao, allStops, r));
+		//		List<Stop> allStops = new ArrayList<>(gtfsDao.getAllStops());
+		//		Random r = new Random(System.nanoTime());
+		//		IntStream.range(0, 100).forEach(i -> calculerAleatoire(gtfsDao, allStops, r));
 	}
 
 	private void calculerAleatoire(GtfsRelationalDao gtfsDao, List<Stop> allStops, Random r) {
@@ -394,12 +393,22 @@ public class Exemple7 implements Cas, GtfsTan {
 
 		StringBuilder sb = new StringBuilder();
 		sb.append(
-				"<?xml version=\"1.0\" encoding=\"UTF-8\"?><kml xmlns=\"http://earth.google.com/kml/2.0\"><Document><Placemark><MultiGeometry>\r\n");
+				"<?xml version=\"1.0\" encoding=\"UTF-8\"?><kml xmlns=\"http://earth.google.com/kml/2.0\"><Document><Folder><name>"
+						+ nom + "</name>\r\n");
 
 		for (Trajet trajet : trajets) {
+			sb.append("<Placemark><name>" + timeFormatter.format(LocalTime.ofSecondOfDay(trajet.depart % 86400)) + " "
+					+ trajet.stationDepart.getName() + " -> "
+					+ timeFormatter.format(LocalTime.ofSecondOfDay(trajet.arrivee % 86400)) + " "
+					+ trajet.stationArrivee.getName() + " ("
+					+ (trajet.trip == null ? "à pied"
+							: trajet.trip.getRoute().getShortName() + " (-> " + trajet.trip.getTripHeadsign() + ")")
+					+ ")" + "</name>\r\n");
 			if (trajet.trip == null) {
+				sb.append("<Style><LineStyle><color>#ff7f0055</color><width>5</width></LineStyle></Style>\r\n");
 				ajouterPoints(sb, trajet.stationDepart, trajet.stationArrivee);
 			} else {
+				sb.append("<Style><LineStyle><color>#ffff5500</color><width>5</width></LineStyle></Style>\r\n");
 				LineString shape = shapes.get(trajet.trip.getShapeId().getId());
 				if (shape.getNumPoints() > 0) {
 					Coordinate debut = new Coordinate(trajet.stationDepart.getLon(), trajet.stationDepart.getLat());
@@ -417,8 +426,9 @@ public class Exemple7 implements Cas, GtfsTan {
 					System.err.println("Trajet manquant... : " + trajet.trip.getShapeId().getId());
 				}
 			}
+			sb.append("</Placemark>\r\n");
 		}
-		sb.append("</MultiGeometry></Placemark></Document></kml>");
+		sb.append("</Folder></Document></kml>");
 		try {
 			Files.write(Paths.get("kml/" + nom + ".kml"), sb.toString().getBytes());
 		} catch (IOException e1) {
